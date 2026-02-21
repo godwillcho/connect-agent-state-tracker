@@ -128,29 +128,30 @@ Any status created in your Connect instance is automatically captured. Unknown s
 python deploy.py deploy
 ```
 
-The script prompts for all parameters:
+The script prompts for all parameters interactively. Most have sensible defaults — just press Enter to accept.
 
-```
-AWS Region [us-east-1]:
-Stack name (without env suffix): agent-state-tracker
-Environment suffix (e.g., dev, prod, staging) [dev]: dev
-Connect instance domain: myinstance.my.connect.aws
-S3 bucket name for Parquet data: my-agent-state-bucket
-S3 key prefix [agent-state-events]:
-Athena results bucket name (optional):
-Athena bytes scan limit [1073741824]:
-Data retention days [90]:
-AWSSDKPandas Lambda Layer ARN: arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python312:16
-Connect instance ARN: arn:aws:connect:us-east-1:123456789012:instance/xxxxxxxx-xxxx-...
-```
+#### Deployment Parameters
 
-Then select which security profiles should have access to the service.
+| Parameter | Default | Required | Description |
+|---|---|---|---|
+| **AWS Region** | `us-east-1` | | AWS region where all resources are created |
+| **Stack name** | `agent-state-tracker` | | Base name for the CloudFormation stack. All resource names derive from this (Lambda, Glue DB, workgroup, etc.) |
+| **Environment suffix** | `dev` | | Appended to the stack name (e.g., `agent-state-tracker-dev`). Use `prod`, `staging`, or any custom label to run multiple environments side by side |
+| **Connect instance domain** | — | Yes | Your Connect instance domain (e.g., `myinstance.my.connect.aws`). Used for CSP headers so the service page can load inside the Agent Workspace iframe |
+| **S3 bucket name** | `softwareone-agent-state-551642657889` | | Name of the S3 bucket where Parquet files are stored. The bucket is created by the stack |
+| **S3 key prefix** | `agent-state-events` | | Prefix under the bucket for Parquet files. Data is stored as `s3://bucket/prefix/year=.../month=.../day=.../` |
+| **Athena results bucket** | `softwareone-athena-results-551642657889` | | S3 bucket for Athena query result files. If provided, an existing bucket is used; if empty, the stack creates one named `<stack-name>-athena-results` |
+| **Athena bytes scan limit** | `2199023255552` (2 TB) | | Maximum bytes a single Athena query can scan before being rejected. Prevents accidental expensive queries. Athena charges $5/TB scanned. Set to `0` for unlimited |
+| **Data retention days** | `90` | | Number of days before Parquet files are expired and deleted from S3. Files transition to Standard-IA at 30 days and Glacier at 60 days before expiration |
+| **Lambda Layer ARN** | `arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python312:16` | | ARN of the AWS-managed AWSSDKPandas layer, which provides PyArrow for Parquet writing. Must match your deployment region |
+| **Connect instance ARN** | — | Yes | Full ARN of your Amazon Connect instance (e.g., `arn:aws:connect:us-east-1:123456789012:instance/xxxxxxxx-...`). Used to register the 3P service and associate it with the instance |
+| **Security profile selection** | *(interactive)* | | After deployment, the script lists all security profiles and prompts you to choose which ones should have access to the 3P service (comma-separated numbers) |
 
 The deploy script will:
 1. Create/update the CloudFormation stack (`agent-state-tracker-dev`)
-2. Package and upload Lambda code
+2. Package and upload Lambda code (handler, enrichment, parquet writer, service page, SDK bundle)
 3. Grant security profile access to the 3P service
-4. Print a deployment summary with all resource names
+4. Print a deployment summary with all resource names and ARNs
 
 ### Destroy
 
@@ -248,15 +249,31 @@ Full list: [aws-sdk-pandas layers](https://aws-sdk-pandas.readthedocs.io/en/stab
 
 ## Cost Estimate
 
-For a 50-agent contact center with ~500 transitions/agent/day:
+### 100 agents — rough monthly estimate
 
-| Resource | Monthly Cost |
-|---|---|
-| Lambda (~25,000 invocations/month) | ~$0.50 |
-| S3 Standard (~100 MB Parquet/month) | ~$0.01 |
-| Glue Data Catalog | Free tier |
-| Athena queries | ~$0.01-$5.00 |
-| **Total** | **< $6/month** |
+Assumptions: 100 agents, 8-hour shifts, ~20 state transitions per hour per agent, 22 working days/month.
+
+A single contact generates ~4 transitions (Available → Incoming → Connected → ACW → Available). At 4-5 contacts/hour plus occasional breaks, that's ~20 transitions/hour or **~160 transitions/agent/day**.
+
+**Data volume:**
+- ~160 transitions/day x 100 agents x 22 days = **352,000 events/month**
+- Each Parquet record is ~200 bytes compressed = **~70 MB Parquet/month**
+
+**Lambda invocations:**
+- Events are batched client-side (flush every 5 seconds only when events are buffered)
+- Realistically **~30,000-60,000 invocations/month** (most 5-second intervals have no events to flush)
+
+| Resource | Calculation | Monthly Cost |
+|---|---|---|
+| Lambda | ~100K invocations x 512 MB x ~200ms avg | ~$0.50 |
+| S3 Standard | ~100 MB Parquet storage | ~$0.01 |
+| S3 Lifecycle | Standard-IA after 30 days, Glacier after 60 | Reduces cost further |
+| Glue Data Catalog | 1 database + 1 table | Free tier |
+| Athena queries | ~$5/TB scanned; partitioned Parquet = few MB per query | ~$0.01-$5.00 |
+| CloudWatch Logs | Lambda execution logs | ~$0.50 |
+| **Total** | | **~$1-$6/month** |
+
+The main variable is Athena usage — a heavy analyst running many unfiltered queries could push costs higher, but the 2 TB byte-scan limit prevents runaway bills.
 
 ## License
 

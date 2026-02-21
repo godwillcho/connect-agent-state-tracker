@@ -321,27 +321,25 @@ def cmd_deploy():
 
     # ── Collect parameters ────────────────────
     region = prompt("AWS Region", default=boto3.Session().region_name or 'us-east-1')
-    stack_name = prompt("Stack name (without env suffix)")
+    stack_name = prompt("Stack name (without env suffix)", default='agent-state-tracker')
     environment = prompt("Environment suffix (e.g., dev, prod, staging)", default='dev')
     stack_name = f"{stack_name}-{environment}"
     logger.info("Full stack name: %s", stack_name)
     connect_domain = prompt("Connect instance domain (e.g., myinstance.my.connect.aws)")
-    bucket_name = prompt("S3 bucket name for Parquet data")
+    bucket_name = prompt("S3 bucket name for Parquet data", default='softwareone-agent-state-551642657889')
     prefix = prompt("S3 key prefix", default='agent-state-events')
     athena_bucket = prompt(
         "Athena results bucket name",
-        default='',
-        required=False,
+        default='softwareone-athena-results-551642657889',
     )
-    bytes_limit = prompt("Athena bytes scan limit", default='1073741824')
+    bytes_limit = prompt("Athena bytes scan limit", default='2199023255552')
     retention_days = prompt("Data retention days", default='90')
     layer_arn = prompt(
-        "AWSSDKPandas Lambda Layer ARN "
-        "(e.g., arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python312:16)"
+        "AWSSDKPandas Lambda Layer ARN",
+        default='arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python312:16',
     )
     connect_instance_arn = prompt(
-        "Connect instance ARN "
-        "(e.g., arn:aws:connect:us-east-1:123456789012:instance/xxxxxxxx-...)"
+        "Connect instance ARN"
     )
 
     print()
@@ -533,13 +531,12 @@ def cmd_destroy():
 
     # ── Collect parameters ────────────────────
     region = prompt("AWS Region", default=boto3.Session().region_name or 'us-east-1')
-    stack_name = prompt("Stack name (without env suffix)")
+    stack_name = prompt("Stack name (without env suffix)", default='agent-state-tracker')
     environment = prompt("Environment suffix (e.g., dev, prod, staging)", default='dev')
     stack_name = f"{stack_name}-{environment}"
     logger.info("Full stack name: %s", stack_name)
     connect_instance_arn = prompt(
-        "Connect instance ARN "
-        "(e.g., arn:aws:connect:us-east-1:123456789012:instance/xxxxxxxx-...)"
+        "Connect instance ARN"
     )
     print()
 

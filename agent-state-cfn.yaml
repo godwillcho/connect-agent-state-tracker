@@ -32,9 +32,9 @@ Parameters:
 
   BytesScanLimit:
     Type: Number
-    Default: 1073741824
+    Default: 2199023255552
     Description: >
-      Maximum bytes an Athena query can scan (default 1 GB = 1073741824).
+      Maximum bytes an Athena query can scan (default 2 TB = 2199023255552).
       Set to 0 for unlimited.
 
   DataRetentionDays:
