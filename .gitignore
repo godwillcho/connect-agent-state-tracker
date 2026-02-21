@@ -1,0 +1,26 @@
+# Dependencies
+sdk-build/node_modules/
+
+# Build artifacts
+*.zip
+sdk-build/connect-sdk-service.bundle.js
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code
+.claude/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Legacy files (from earlier CSV pipeline prototype)
+cloudformation-template.yaml
+athena_queries.sql
+lambda_process_report.py

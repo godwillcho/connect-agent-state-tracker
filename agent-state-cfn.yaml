@@ -1,0 +1,418 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Amazon Connect Agent State Tracker.
+  Deploys a Lambda Function URL (serves headless 3P service + processes events),
+  S3 bucket for Parquet storage, Glue database/table with partition projection,
+  and an Athena workgroup for querying agent state transition data.
+
+Parameters:
+  ConnectInstanceDomain:
+    Type: String
+    Description: >
+      The Amazon Connect instance domain (e.g., myinstance.my.connect.aws).
+      Used for CORS and CSP header configuration.
+
+  AgentStateBucketName:
+    Type: String
+    Description: >
+      Name of the S3 bucket for storing agent state Parquet files.
+      A new bucket will be created with this name.
+
+  AgentStatePrefix:
+    Type: String
+    Default: "agent-state-events"
+    Description: S3 key prefix for Parquet files under the bucket.
+
+  AthenaResultsBucketName:
+    Type: String
+    Default: ""
+    Description: >
+      (Optional) Existing S3 bucket for Athena query results.
+      If empty, a new bucket will be created.
+
+  BytesScanLimit:
+    Type: Number
+    Default: 1073741824
+    Description: >
+      Maximum bytes an Athena query can scan (default 1 GB = 1073741824).
+      Set to 0 for unlimited.
+
+  DataRetentionDays:
+    Type: Number
+    Default: 90
+    Description: >
+      Number of days to retain Parquet files in S3 before
+      lifecycle expiration.
+
+  LambdaLayerArn:
+    Type: String
+    Description: >
+      ARN of the AWSSDKPandas Lambda Layer for your region.
+      Example: arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python312:16
+
+  ConnectInstanceArn:
+    Type: String
+    Description: >
+      Full ARN of the Amazon Connect instance to associate the service with.
+      Example: arn:aws:connect:us-east-1:123456789012:instance/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+  Environment:
+    Type: String
+    Default: "dev"
+    Description: >
+      Environment label (e.g., dev, prod, staging). Applied as a tag to all resources.
+
+Conditions:
+  CreateAthenaResultsBucket: !Equals [!Ref AthenaResultsBucketName, ""]
+  HasBytesScanLimit: !Not [!Equals [!Ref BytesScanLimit, 0]]
+
+Resources:
+
+  # ──────────────────────────────────────────
+  # S3 Bucket - Parquet Data
+  # ──────────────────────────────────────────
+  AgentStateBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref AgentStateBucketName
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionAndExpire
+            Status: Enabled
+            Prefix: !Sub "${AgentStatePrefix}/"
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 30
+              - StorageClass: GLACIER
+                TransitionInDays: 60
+            ExpirationInDays: !Ref DataRetentionDays
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: ConnectAgentStateTracker
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ──────────────────────────────────────────
+  # S3 Bucket - Athena Query Results (optional)
+  # ──────────────────────────────────────────
+  AthenaResultsBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateAthenaResultsBucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-athena-results"
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireQueryResults
+            Status: Enabled
+            ExpirationInDays: 7
+            Prefix: "query-results/"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: ConnectAgentStateTracker
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ──────────────────────────────────────────
+  # IAM Role for Lambda
+  # ──────────────────────────────────────────
+  AgentStateLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-agent-state-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3WriteAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${AgentStateBucketName}/${AgentStatePrefix}/*"
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${AgentStateBucketName}"
+
+  # ──────────────────────────────────────────
+  # Lambda Function
+  # ──────────────────────────────────────────
+  AgentStateFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-agent-state"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Role: !GetAtt AgentStateLambdaRole.Arn
+      Timeout: 30
+      MemorySize: 512
+      Layers:
+        - !Ref LambdaLayerArn
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref AgentStateBucketName
+          S3_PREFIX: !Ref AgentStatePrefix
+          CONNECT_INSTANCE_DOMAIN: !Ref ConnectInstanceDomain
+      Code:
+        ZipFile: |
+          # Placeholder - deploy actual code via:
+          #   zip agent_state.zip handler.py enrichment.py parquet_writer.py service_page.py
+          #   aws lambda update-function-code \
+          #     --function-name <stack-name>-agent-state \
+          #     --zip-file fileb://agent_state.zip
+          # See handler.py for the entry point.
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': 'Placeholder'}
+      Tags:
+        - Key: Project
+          Value: ConnectAgentStateTracker
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ──────────────────────────────────────────
+  # Lambda Function URL
+  # ──────────────────────────────────────────
+  AgentStateFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !GetAtt AgentStateFunction.Arn
+      Cors:
+        AllowCredentials: false
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - GET
+          - POST
+        AllowHeaders:
+          - Content-Type
+        MaxAge: 86400
+
+  AgentStateFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AgentStateFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  # ──────────────────────────────────────────
+  # Glue Database
+  # ──────────────────────────────────────────
+  AgentStateGlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Sub "${AWS::StackName}_agent_state"
+        Description: >
+          Agent state transition data captured from Amazon Connect
+          workspace headless service.
+
+  # ──────────────────────────────────────────
+  # Glue Table - Parquet with Partition Projection
+  # ──────────────────────────────────────────
+  AgentStateGlueTable:
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref AgentStateGlueDatabase
+      TableInput:
+        Name: agent_state_transitions
+        Description: >
+          Pre-computed agent state transition records with duration,
+          status categories, and productivity flags.
+          Partitioned by year/month/day.
+        TableType: EXTERNAL_TABLE
+        Parameters:
+          "classification": "parquet"
+          "projection.enabled": "true"
+          "projection.year.type": "integer"
+          "projection.year.range": "2024,2030"
+          "projection.year.digits": "4"
+          "projection.month.type": "integer"
+          "projection.month.range": "1,12"
+          "projection.month.digits": "2"
+          "projection.day.type": "integer"
+          "projection.day.range": "1,31"
+          "projection.day.digits": "2"
+          "storage.location.template": !Sub
+            - "s3://${Bucket}/${Prefix}/year=${!year}/month=${!month}/day=${!day}/"
+            - Bucket: !Ref AgentStateBucketName
+              Prefix: !Ref AgentStatePrefix
+        PartitionKeys:
+          - Name: year
+            Type: int
+          - Name: month
+            Type: int
+          - Name: day
+            Type: int
+        StorageDescriptor:
+          Location: !Sub "s3://${AgentStateBucketName}/${AgentStatePrefix}/"
+          InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
+          SerdeInfo:
+            SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
+            Parameters:
+              "serialization.format": "1"
+          Columns:
+            - Name: agent_arn
+              Type: string
+            - Name: agent_name
+              Type: string
+            - Name: status_name
+              Type: string
+            - Name: status_category
+              Type: string
+            - Name: previous_status_name
+              Type: string
+            - Name: new_status_name
+              Type: string
+            - Name: transition_timestamp
+              Type: string
+            - Name: timezone
+              Type: string
+            - Name: duration_seconds
+              Type: bigint
+            - Name: is_productive
+              Type: boolean
+            - Name: is_contact_handling
+              Type: boolean
+            - Name: date_str
+              Type: string
+            - Name: hour_of_day
+              Type: int
+            - Name: day_of_week
+              Type: string
+            - Name: source
+              Type: string
+            - Name: session_id
+              Type: string
+
+  # ──────────────────────────────────────────
+  # Athena WorkGroup
+  # ──────────────────────────────────────────
+  AgentStateAthenaWorkGroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: !Sub "${AWS::StackName}-workgroup"
+      Description: >
+        Dedicated workgroup for agent state transition queries.
+        Cost-controlled with byte scan limits and enforced settings.
+      State: ENABLED
+      WorkGroupConfiguration:
+        EnforceWorkGroupConfiguration: true
+        PublishCloudWatchMetricsEnabled: true
+        BytesScannedCutoffPerQuery: !If
+          - HasBytesScanLimit
+          - !Ref BytesScanLimit
+          - !Ref "AWS::NoValue"
+        EngineVersion:
+          SelectedEngineVersion: "Athena engine version 3"
+        ResultConfiguration:
+          OutputLocation: !If
+            - CreateAthenaResultsBucket
+            - !Sub "s3://${AthenaResultsBucket}/query-results/"
+            - !Sub "s3://${AthenaResultsBucketName}/query-results/"
+          EncryptionConfiguration:
+            EncryptionOption: SSE_S3
+      Tags:
+        - Key: Project
+          Value: ConnectAgentStateTracker
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ──────────────────────────────────────────
+  # 3P Application Registration
+  # ──────────────────────────────────────────
+  AgentStateServiceApp:
+    Type: AWS::AppIntegrations::Application
+    DependsOn: AgentStateFunctionUrl
+    Properties:
+      Name: !Sub "${AWS::StackName}-agent-state-service"
+      Namespace: !Sub "${AWS::StackName}.state"
+      Description: "Headless service that captures agent state transitions and writes them to S3 Parquet."
+      IsService: true
+      InitializationTimeout: 30000
+      ApplicationSourceConfig:
+        ExternalUrlConfig:
+          AccessUrl: !GetAtt AgentStateFunctionUrl.FunctionUrl
+          ApprovedOrigins:
+            - !Sub "https://${ConnectInstanceDomain}"
+      Tags:
+        - Key: Project
+          Value: ConnectAgentStateTracker
+        - Key: Environment
+          Value: !Ref Environment
+
+  AgentStateIntegrationAssociation:
+    Type: AWS::Connect::IntegrationAssociation
+    Properties:
+      InstanceId: !Ref ConnectInstanceArn
+      IntegrationType: APPLICATION
+      IntegrationArn: !GetAtt AgentStateServiceApp.ApplicationArn
+
+Outputs:
+  FunctionUrl:
+    Description: >
+      Lambda Function URL. Use this as the Access URL when registering
+      the 3P service in Amazon Connect (Application type: Service).
+    Value: !GetAtt AgentStateFunctionUrl.FunctionUrl
+
+  LambdaFunctionArn:
+    Description: ARN of the agent state Lambda function
+    Value: !GetAtt AgentStateFunction.Arn
+
+  GlueDatabaseName:
+    Description: Glue database name for Athena queries
+    Value: !Ref AgentStateGlueDatabase
+
+  GlueTableName:
+    Description: Glue table name for agent state transitions
+    Value: agent_state_transitions
+
+  AthenaWorkGroupName:
+    Description: Athena workgroup for querying agent state data
+    Value: !Ref AgentStateAthenaWorkGroup
+
+  S3ParquetLocation:
+    Description: S3 location of Parquet files
+    Value: !Sub "s3://${AgentStateBucketName}/${AgentStatePrefix}/"
+
+  ApplicationArn:
+    Description: ARN of the registered 3P service application
+    Value: !GetAtt AgentStateServiceApp.ApplicationArn
+
+  ApplicationNamespace:
+    Description: >
+      Application namespace. Use this when granting access
+      in agent security profiles.
+    Value: !Sub "${AWS::StackName}.state"
