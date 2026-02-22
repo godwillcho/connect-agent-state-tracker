@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent State Tracker — System Architecture</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #090e1a;
+    --bg-surface: #0f1629;
+    --bg-card: #141b2d;
+    --bg-elevated: #1a2340;
+    --border: rgba(148,163,184,0.08);
+    --border-accent: rgba(148,163,184,0.15);
+    --text: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+
+    --blue: #3b82f6;
+    --blue-muted: #2563eb;
+    --blue-dim: rgba(59,130,246,0.08);
+    --blue-border: rgba(59,130,246,0.2);
+
+    --amber: #f59e0b;
+    --amber-muted: #d97706;
+    --amber-dim: rgba(245,158,11,0.08);
+    --amber-border: rgba(245,158,11,0.2);
+
+    --green: #10b981;
+    --green-muted: #059669;
+    --green-dim: rgba(16,185,129,0.08);
+    --green-border: rgba(16,185,129,0.2);
+
+    --purple: #8b5cf6;
+    --purple-muted: #7c3aed;
+    --purple-dim: rgba(139,92,246,0.08);
+    --purple-border: rgba(139,92,246,0.2);
+
+    --cyan: #06b6d4;
+    --cyan-dim: rgba(6,182,212,0.12);
+    --cyan-glow: rgba(6,182,212,0.5);
+
+    --radius: 12px;
+    --radius-sm: 8px;
+    --radius-xs: 6px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Background Grid Pattern ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(148,163,184,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148,163,184,0.03) 1px, transparent 1px);
+    background-size: 60px 60px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .page { position: relative; z-index: 1; }
+
+  /* ── Header ── */
+  .header {
+    padding: 48px 24px 32px;
+    text-align: center;
+    position: relative;
+  }
+
+  .header::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 80%;
+    max-width: 600px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-accent), transparent);
+  }
+
+  .header-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 14px;
+    border-radius: 20px;
+    background: var(--cyan-dim);
+    border: 1px solid rgba(6,182,212,0.15);
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--cyan);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  .header-badge svg { width: 14px; height: 14px; }
+
+  h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+  }
+
+  .subtitle {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    font-weight: 400;
+  }
+
+  /* ── Step Navigation ── */
+  .controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 28px 24px 0;
+    gap: 16px;
+  }
+
+  .step-nav {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    border-radius: 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+  }
+
+  .step-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-radius: var(--radius-xs);
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+  }
+
+  .step-btn:hover { color: var(--text-secondary); background: rgba(255,255,255,0.03); }
+
+  .step-btn.active {
+    background: var(--bg-elevated);
+    color: var(--text);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+
+  .step-btn .num {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-weight: 700;
+    background: rgba(255,255,255,0.06);
+    color: var(--text-muted);
+    transition: all 0.2s ease;
+  }
+
+  .step-btn.active .num { background: var(--cyan); color: #000; }
+
+  /* ── Narration ── */
+  .narration {
+    max-width: 680px;
+    width: 100%;
+    padding: 14px 20px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    line-height: 1.65;
+    text-align: center;
+    transition: all 0.3s ease;
+    min-height: 44px;
+  }
+
+  .narration code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.76rem;
+    background: rgba(255,255,255,0.06);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  .nar-step { font-weight: 600; color: var(--text); }
+  .nar-highlight { color: var(--cyan); font-weight: 500; }
+
+  /* ── Architecture Container ── */
+  .architecture {
+    max-width: 680px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 32px 24px 48px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* ── Cards ── */
+  .card {
+    width: 100%;
+    border-radius: var(--radius);
+    padding: 24px;
+    position: relative;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    opacity: 0;
+    transform: translateY(20px);
+    animation: slideIn 0.5s ease forwards;
+  }
+
+  .card:nth-child(1) { animation-delay: 0.1s; }
+  .card:nth-child(3) { animation-delay: 0.3s; }
+  .card:nth-child(5) { animation-delay: 0.5s; }
+  .card:nth-child(7) { animation-delay: 0.7s; }
+
+  @keyframes slideIn { to { opacity: 1; transform: translateY(0); } }
+
+  .card:hover { border-color: var(--border-accent); background: var(--bg-elevated); }
+
+  .card.dimmed { opacity: 0.18; filter: grayscale(0.5); pointer-events: none; }
+  .card.focused { border-color: var(--focus-border); box-shadow: 0 0 0 1px var(--focus-border), 0 4px 24px var(--focus-glow); }
+
+  .card-blue.focused  { --focus-border: var(--blue-border);  --focus-glow: rgba(59,130,246,0.08); }
+  .card-amber.focused { --focus-border: var(--amber-border); --focus-glow: rgba(245,158,11,0.08); }
+  .card-green.focused { --focus-border: var(--green-border); --focus-glow: rgba(16,185,129,0.08); }
+  .card-purple.focused{ --focus-border: var(--purple-border);--focus-glow: rgba(139,92,246,0.08); }
+
+  /* ── Pulse ── */
+  @keyframes cardPulse {
+    0%   { box-shadow: 0 0 0 0 var(--pulse-color); }
+    50%  { box-shadow: 0 0 0 4px var(--pulse-color); }
+    100% { box-shadow: none; }
+  }
+
+  .card.pulse { animation: cardPulse 0.5s ease; }
+  .card-blue.pulse  { --pulse-color: rgba(59,130,246,0.15); }
+  .card-amber.pulse { --pulse-color: rgba(245,158,11,0.15); }
+  .card-green.pulse { --pulse-color: rgba(16,185,129,0.15); }
+  .card-purple.pulse{ --pulse-color: rgba(139,92,246,0.15); }
+
+  /* ── Card Header ── */
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .card-icon-wrap {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .card-icon-wrap svg { width: 18px; height: 18px; }
+
+  .card-blue .card-icon-wrap  { background: var(--blue-dim);  color: var(--blue); }
+  .card-amber .card-icon-wrap { background: var(--amber-dim); color: var(--amber); }
+  .card-green .card-icon-wrap { background: var(--green-dim); color: var(--green); }
+  .card-purple .card-icon-wrap{ background: var(--purple-dim);color: var(--purple); }
+
+  .card-label {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .card-step-label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .card-blue .card-step-label  { color: var(--blue); }
+  .card-amber .card-step-label { color: var(--amber); }
+  .card-green .card-step-label { color: var(--green); }
+  .card-purple .card-step-label{ color: var(--purple); }
+
+  .card-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .card-desc {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  .card-desc code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.74rem;
+    background: rgba(255,255,255,0.06);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--text);
+  }
+
+  /* ── Inner Panel (3P Service) ── */
+  .inner-panel {
+    margin-top: 14px;
+    padding: 16px;
+    border-radius: var(--radius-sm);
+    background: rgba(0,0,0,0.2);
+    border: 1px solid rgba(59,130,246,0.1);
+  }
+
+  .inner-panel-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--blue);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .inner-panel-title::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 2px;
+    background: var(--blue);
+    opacity: 0.6;
+  }
+
+  /* ── Status Badge ── */
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  .status-label {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    transition: all 0.3s ease;
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    transition: background 0.3s ease;
+  }
+
+  .status-available    { background: rgba(16,185,129,0.12); color: #34d399; }
+  .status-available .status-dot { background: #10b981; }
+  .status-incoming     { background: rgba(59,130,246,0.12); color: #60a5fa; }
+  .status-incoming .status-dot  { background: #3b82f6; }
+  .status-connected    { background: rgba(6,182,212,0.12);  color: #22d3ee; }
+  .status-connected .status-dot { background: #06b6d4; }
+  .status-acw          { background: rgba(245,158,11,0.12); color: #fbbf24; }
+  .status-acw .status-dot       { background: #f59e0b; }
+  .status-break        { background: rgba(239,68,68,0.12);  color: #f87171; }
+  .status-break .status-dot     { background: #ef4444; }
+  .status-offline      { background: rgba(100,116,139,0.12);color: #94a3b8; }
+  .status-offline .status-dot   { background: #64748b; }
+
+  /* ── Status Picker ── */
+  .status-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255,255,255,0.04);
+  }
+
+  .status-picker-label {
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    width: 100%;
+    margin-bottom: 4px;
+  }
+
+  .status-pick {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border-radius: var(--radius-xs);
+    font-size: 0.7rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+    background: rgba(255,255,255,0.03);
+    color: var(--text-secondary);
+    transition: all 0.2s ease;
+    user-select: none;
+  }
+
+  .status-pick:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+
+  .status-pick.selected {
+    border-color: var(--sel-color, rgba(255,255,255,0.2));
+    background: var(--sel-bg, rgba(255,255,255,0.06));
+    color: var(--sel-text, var(--text));
+  }
+
+  .pick-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+
+  .pick-available    { --sel-color: rgba(16,185,129,0.3); --sel-bg: rgba(16,185,129,0.1);  --sel-text: #34d399; }
+  .pick-available .pick-dot { background: #10b981; }
+  .pick-incoming     { --sel-color: rgba(59,130,246,0.3); --sel-bg: rgba(59,130,246,0.1);  --sel-text: #60a5fa; }
+  .pick-incoming .pick-dot  { background: #3b82f6; }
+  .pick-connected    { --sel-color: rgba(6,182,212,0.3);  --sel-bg: rgba(6,182,212,0.1);   --sel-text: #22d3ee; }
+  .pick-connected .pick-dot { background: #06b6d4; }
+  .pick-acw          { --sel-color: rgba(245,158,11,0.3); --sel-bg: rgba(245,158,11,0.1);  --sel-text: #fbbf24; }
+  .pick-acw .pick-dot       { background: #f59e0b; }
+  .pick-break        { --sel-color: rgba(239,68,68,0.3);  --sel-bg: rgba(239,68,68,0.1);   --sel-text: #f87171; }
+  .pick-break .pick-dot     { background: #ef4444; }
+  .pick-lunch        { --sel-color: rgba(251,146,60,0.3); --sel-bg: rgba(251,146,60,0.1);  --sel-text: #fb923c; }
+  .pick-lunch .pick-dot     { background: #f97316; }
+  .pick-training     { --sel-color: rgba(139,92,246,0.3); --sel-bg: rgba(139,92,246,0.1);  --sel-text: #a78bfa; }
+  .pick-training .pick-dot  { background: #8b5cf6; }
+  .pick-offline      { --sel-color: rgba(100,116,139,0.3);--sel-bg: rgba(100,116,139,0.1); --sel-text: #94a3b8; }
+  .pick-offline .pick-dot   { background: #64748b; }
+
+  /* ── Buffer ── */
+  .buffer-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  .buffer-bar { display: flex; gap: 4px; align-items: center; }
+
+  .buffer-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(6,182,212,0.1);
+    border: 1px solid rgba(6,182,212,0.2);
+    transition: all 0.25s ease;
+  }
+
+  .buffer-dot.filled {
+    background: var(--cyan);
+    border-color: var(--cyan);
+    box-shadow: 0 0 6px var(--cyan-glow);
+  }
+
+  .flush-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--cyan);
+    opacity: 0;
+    transform: translateX(-4px);
+    transition: all 0.25s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .flush-label.active { opacity: 1; transform: translateX(0); }
+
+  /* ── Connectors ── */
+  .connector {
+    width: 100%;
+    height: 56px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    animation: slideIn 0.3s ease forwards;
+    transition: opacity 0.3s ease, filter 0.3s ease;
+  }
+
+  .connector:nth-child(2) { animation-delay: 0.2s; }
+  .connector:nth-child(4) { animation-delay: 0.4s; }
+  .connector:nth-child(6) { animation-delay: 0.6s; }
+
+  .connector.dimmed { opacity: 0.1; filter: grayscale(0.5); }
+
+  .connector svg { position: absolute; width: 100%; height: 100%; }
+
+  .conn-line {
+    stroke: var(--border-accent);
+    stroke-width: 1;
+    stroke-dasharray: 4 4;
+    fill: none;
+    transition: stroke 0.3s ease;
+  }
+
+  .connector.active-flow .conn-line {
+    stroke: rgba(6,182,212,0.4);
+    stroke-width: 2;
+    stroke-dasharray: none;
+  }
+
+  .conn-label {
+    background: var(--bg-surface);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    z-index: 2;
+    white-space: nowrap;
+    transition: all 0.3s ease;
+  }
+
+  .connector.active-flow .conn-label {
+    color: var(--cyan);
+    border-color: rgba(6,182,212,0.25);
+  }
+
+  /* ── Particle ── */
+  .particle {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--cyan);
+    box-shadow: 0 0 10px var(--cyan-glow);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  @keyframes particleFall {
+    0%   { top: 0; opacity: 0; }
+    15%  { opacity: 1; }
+    85%  { opacity: 1; }
+    100% { top: calc(100% - 6px); opacity: 0; }
+  }
+
+  .particle.active { animation: particleFall 0.7s ease-in-out forwards; }
+
+  .particle-trail {
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--cyan);
+    box-shadow: 0 0 6px var(--cyan-glow);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  .particle-trail.active { animation: particleFall 0.9s ease-in-out forwards; }
+
+  /* ── Route Badges ── */
+  .route-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  .route-badge {
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: var(--radius-xs);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .route-get {
+    background: rgba(16,185,129,0.08);
+    color: var(--green);
+    border: 1px solid var(--green-border);
+  }
+
+  .route-post {
+    background: rgba(59,130,246,0.08);
+    color: var(--blue);
+    border: 1px solid var(--blue-border);
+  }
+
+  /* ── Enrichment List ── */
+  .enrich-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 12px;
+    margin-top: 6px;
+  }
+
+  .enrich-item {
+    font-size: 0.76rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    opacity: 0;
+    animation: fadeIn 0.3s ease forwards;
+  }
+
+  .enrich-item:nth-child(1) { animation-delay: 0.8s; }
+  .enrich-item:nth-child(2) { animation-delay: 0.9s; }
+  .enrich-item:nth-child(3) { animation-delay: 1.0s; }
+  .enrich-item:nth-child(4) { animation-delay: 1.1s; }
+  .enrich-item:nth-child(5) { animation-delay: 1.2s; }
+
+  @keyframes fadeIn { to { opacity: 1; } }
+
+  .enrich-icon {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--amber);
+    flex-shrink: 0;
+    opacity: 0.7;
+  }
+
+  /* ── S3 Path ── */
+  .s3-path {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.74rem;
+    margin-top: 8px;
+    line-height: 1.9;
+    padding: 12px 14px;
+    border-radius: var(--radius-sm);
+    background: rgba(0,0,0,0.2);
+  }
+
+  .s3-dim  { color: var(--text-muted); }
+  .s3-key  { color: var(--green); }
+  .s3-file { color: var(--text-secondary); opacity: 0.8; animation: filePulse 4s ease-in-out infinite; display: inline-block; }
+
+  @keyframes filePulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+
+  .lifecycle-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+
+  .lifecycle-tag {
+    font-size: 0.66rem;
+    font-weight: 500;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.04);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+
+  .lifecycle-arrow {
+    color: var(--text-muted);
+    font-size: 0.66rem;
+    display: flex;
+    align-items: center;
+    opacity: 0.4;
+  }
+
+  /* ── SQL Block ── */
+  .sql-block {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    background: rgba(0,0,0,0.25);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    margin-top: 12px;
+    line-height: 1.8;
+    min-height: 90px;
+    border: 1px solid rgba(139,92,246,0.08);
+  }
+
+  .sql-kw  { color: var(--purple); }
+  .sql-col { color: var(--text-secondary); }
+  .sql-tbl { color: var(--cyan); }
+  .sql-val { color: var(--green); }
+  .sql-cursor {
+    display: inline-block;
+    width: 7px;
+    height: 13px;
+    background: var(--purple);
+    vertical-align: text-bottom;
+    opacity: 0.7;
+    animation: blink 1s step-end infinite;
+  }
+
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ── Footer ── */
+  .footer {
+    padding: 32px 24px 40px;
+    text-align: center;
+  }
+
+  .footer-divider {
+    width: 80%;
+    max-width: 400px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-accent), transparent);
+    margin: 0 auto 20px;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    justify-content: center;
+    margin-bottom: 14px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 3px;
+  }
+
+  .footer-hint {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    opacity: 0.5;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 520px) {
+    .enrich-grid { grid-template-columns: 1fr; }
+    .card { padding: 18px; }
+    h1 { font-size: 1.4rem; }
+    .step-nav { flex-wrap: wrap; justify-content: center; }
+    .step-btn { padding: 6px 12px; font-size: 0.75rem; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ═══════ Header ═══════ -->
+  <div class="header">
+    <div class="header-badge">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      System Architecture
+    </div>
+    <h1>Amazon Connect Agent State Tracker</h1>
+    <p class="subtitle">Real-time state capture, enrichment, and analytics pipeline</p>
+  </div>
+
+  <!-- ═══════ Controls ═══════ -->
+  <div class="controls">
+    <div class="step-nav">
+      <button class="step-btn active" id="btnAll" onclick="selectStep(-1)">
+        <span class="num" style="background:var(--cyan);color:#000;">&#9654;</span> Full Flow
+      </button>
+      <button class="step-btn" data-step="0" onclick="selectStep(0)">
+        <span class="num">1</span> Capture
+      </button>
+      <button class="step-btn" data-step="1" onclick="selectStep(1)">
+        <span class="num">2</span> Enrich
+      </button>
+      <button class="step-btn" data-step="2" onclick="selectStep(2)">
+        <span class="num">3</span> Store
+      </button>
+      <button class="step-btn" data-step="3" onclick="selectStep(3)">
+        <span class="num">4</span> Query
+      </button>
+    </div>
+    <div class="narration" id="narration">
+      Click any step to trace how data moves through the pipeline.
+    </div>
+  </div>
+
+  <!-- ═══════ Architecture ═══════ -->
+  <div class="architecture" id="arch">
+
+    <!-- ── 1. Connect Workspace ── -->
+    <div class="card card-blue" id="card-connect" data-step="0" onclick="selectStep(0)">
+      <div class="card-header">
+        <div class="card-icon-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <div class="card-label">
+          <span class="card-step-label">Step 1 &mdash; Capture</span>
+          <span class="card-title">Amazon Connect Agent Workspace</span>
+        </div>
+      </div>
+      <p class="card-desc">Agents work in the standard Connect workspace. A hidden iframe runs alongside their session, invisible to the agent.</p>
+      <div class="inner-panel">
+        <div class="inner-panel-title">Headless 3P Service (iframe)</div>
+        <p class="card-desc">
+          Connect SDK listens via <code>onStateChanged()</code> for every status transition. Events are buffered client-side and flushed every 5 seconds via <code>POST</code>.
+        </p>
+        <div class="status-row">
+          <span class="status-label">Live status</span>
+          <span class="status-badge status-available" id="statusBadge">
+            <span class="status-dot"></span>
+            <span id="statusText">Available</span>
+          </span>
+        </div>
+        <div class="buffer-row">
+          <span class="status-label">Buffer</span>
+          <div class="buffer-bar">
+            <div class="buffer-dot" id="bd0"></div>
+            <div class="buffer-dot" id="bd1"></div>
+            <div class="buffer-dot" id="bd2"></div>
+            <div class="buffer-dot" id="bd3"></div>
+            <div class="buffer-dot" id="bd4"></div>
+          </div>
+          <span class="flush-label" id="flushLabel">FLUSH</span>
+        </div>
+        <div class="status-picker" onclick="event.stopPropagation()">
+          <span class="status-picker-label">Simulate a transition</span>
+          <span class="status-pick pick-available selected" onclick="pickStatus('Available','status-available',this)"><span class="pick-dot"></span>Available</span>
+          <span class="status-pick pick-incoming" onclick="pickStatus('Incoming','status-incoming',this)"><span class="pick-dot"></span>Incoming</span>
+          <span class="status-pick pick-connected" onclick="pickStatus('Connected','status-connected',this)"><span class="pick-dot"></span>Connected</span>
+          <span class="status-pick pick-acw" onclick="pickStatus('ACW','status-acw',this)"><span class="pick-dot"></span>ACW</span>
+          <span class="status-pick pick-break" onclick="pickStatus('Break','status-break',this)"><span class="pick-dot"></span>Break</span>
+          <span class="status-pick pick-lunch" onclick="pickStatus('Lunch','status-break',this)"><span class="pick-dot"></span>Lunch</span>
+          <span class="status-pick pick-training" onclick="pickStatus('Training','status-incoming',this)"><span class="pick-dot"></span>Training</span>
+          <span class="status-pick pick-offline" onclick="pickStatus('Offline','status-offline',this)"><span class="pick-dot"></span>Offline</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Connector 1 -->
+    <div class="connector" id="conn1">
+      <svg viewBox="0 0 680 56" preserveAspectRatio="none">
+        <line class="conn-line" x1="340" y1="0" x2="340" y2="56"/>
+      </svg>
+      <div class="conn-label">HTTPS POST &middot; Batched JSON</div>
+      <div class="particle" id="p1" style="left:calc(50% - 3px)"></div>
+    </div>
+
+    <!-- ── 2. Lambda ── -->
+    <div class="card card-amber" id="card-lambda" data-step="1" onclick="selectStep(1)">
+      <div class="card-header">
+        <div class="card-icon-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        </div>
+        <div class="card-label">
+          <span class="card-step-label">Step 2 &mdash; Enrich</span>
+          <span class="card-title">Lambda Function URL</span>
+        </div>
+      </div>
+      <div class="route-row">
+        <span class="route-badge route-get">GET &rarr; Serve HTML</span>
+        <span class="route-badge route-post">POST &rarr; Enrich &amp; Write</span>
+      </div>
+      <p class="card-desc" style="margin-bottom:8px">Pre-computed enrichment at write time:</p>
+      <div class="enrich-grid">
+        <div class="enrich-item"><span class="enrich-icon"></span>Duration (seconds in status)</div>
+        <div class="enrich-item"><span class="enrich-icon"></span>Status category</div>
+        <div class="enrich-item"><span class="enrich-icon"></span>Productivity flags</div>
+        <div class="enrich-item"><span class="enrich-icon"></span>UTC &rarr; US/Eastern</div>
+        <div class="enrich-item"><span class="enrich-icon"></span>Partition keys (y/m/d)</div>
+      </div>
+    </div>
+
+    <!-- Connector 2 -->
+    <div class="connector" id="conn2">
+      <svg viewBox="0 0 680 56" preserveAspectRatio="none">
+        <line class="conn-line" x1="340" y1="0" x2="340" y2="56"/>
+      </svg>
+      <div class="conn-label">Snappy-Compressed Parquet</div>
+      <div class="particle" id="p2" style="left:calc(50% - 3px)"></div>
+    </div>
+
+    <!-- ── 3. S3 ── -->
+    <div class="card card-green" id="card-s3" data-step="2" onclick="selectStep(2)">
+      <div class="card-header">
+        <div class="card-icon-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+        </div>
+        <div class="card-label">
+          <span class="card-step-label">Step 3 &mdash; Store</span>
+          <span class="card-title">S3 &mdash; Hive-Partitioned Storage</span>
+        </div>
+      </div>
+      <div class="s3-path">
+        <span class="s3-dim">s3://bucket/prefix/</span><br>
+        &nbsp;&nbsp;<span class="s3-key">year=2026</span><span class="s3-dim">/</span><span class="s3-key">month=02</span><span class="s3-dim">/</span><span class="s3-key">day=21</span><span class="s3-dim">/</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;<span class="s3-file">batch_20260221_143000_abc123.parquet</span>
+      </div>
+      <div class="lifecycle-row">
+        <span class="lifecycle-tag">Standard</span>
+        <span class="lifecycle-arrow">&rarr;</span>
+        <span class="lifecycle-tag">Standard-IA &middot; 30d</span>
+        <span class="lifecycle-arrow">&rarr;</span>
+        <span class="lifecycle-tag">Glacier &middot; 60d</span>
+        <span class="lifecycle-arrow">&rarr;</span>
+        <span class="lifecycle-tag">Expire &middot; 90d</span>
+      </div>
+    </div>
+
+    <!-- Connector 3 -->
+    <div class="connector" id="conn3">
+      <svg viewBox="0 0 680 56" preserveAspectRatio="none">
+        <line class="conn-line" x1="340" y1="0" x2="340" y2="56"/>
+      </svg>
+      <div class="conn-label">Partition Projection</div>
+      <div class="particle" id="p3" style="left:calc(50% - 3px)"></div>
+    </div>
+
+    <!-- ── 4. Glue + Athena ── -->
+    <div class="card card-purple" id="card-athena" data-step="3" onclick="selectStep(3)">
+      <div class="card-header">
+        <div class="card-icon-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </div>
+        <div class="card-label">
+          <span class="card-step-label">Step 4 &mdash; Query</span>
+          <span class="card-title">Glue Table + Athena Workgroup</span>
+        </div>
+      </div>
+      <p class="card-desc">Partition projection auto-discovers partitions. No Glue Crawler needed. Pre-computed columns&nbsp;&mdash; zero transforms at query time.</p>
+      <div class="sql-block" id="sqlBlock"></div>
+    </div>
+
+  </div>
+
+  <!-- ═══════ Footer ═══════ -->
+  <div class="footer">
+    <div class="footer-divider"></div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--blue)"></div>Connect Workspace</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--amber)"></div>Lambda</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>S3 Storage</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--purple)"></div>Analytics</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--cyan);border-radius:50%"></div>Data Flow</div>
+    </div>
+    <p class="footer-hint">Click any card or press 1&ndash;4 to trace the data flow &middot; Press 0 to reset</p>
+  </div>
+
+</div>
+
+<script>
+(function() {
+
+  var cards = [
+    document.getElementById('card-connect'),
+    document.getElementById('card-lambda'),
+    document.getElementById('card-s3'),
+    document.getElementById('card-athena')
+  ];
+  var connectors = [
+    document.getElementById('conn1'),
+    document.getElementById('conn2'),
+    document.getElementById('conn3')
+  ];
+  var particleIds = ['p1','p2','p3'];
+  var stepBtns = document.querySelectorAll('.step-btn[data-step]');
+  var btnAll   = document.getElementById('btnAll');
+  var narEl    = document.getElementById('narration');
+
+  var narrations = [
+    '<span class="nar-step">Step 1 &mdash; Capture:</span> The agent opens their Connect workspace. A <span class="nar-highlight">headless 3P service</span> runs in a hidden iframe. The Connect SDK fires <code>onStateChanged()</code> on every status transition. Events are buffered and flushed every <span class="nar-highlight">5 seconds</span> via HTTPS POST.',
+    '<span class="nar-step">Step 2 &mdash; Enrich:</span> Lambda receives the batched JSON and enriches each event: computes <span class="nar-highlight">duration</span>, classifies the status category, sets <span class="nar-highlight">productivity</span> and contact-handling flags, converts UTC to <span class="nar-highlight">US/Eastern</span>, and derives partition keys.',
+    '<span class="nar-step">Step 3 &mdash; Store:</span> Enriched events are written as <span class="nar-highlight">Snappy-compressed Parquet</span> to S3 in Hive-style partitions. Lifecycle rules transition files through storage tiers before expiration at <span class="nar-highlight">90 days</span>.',
+    '<span class="nar-step">Step 4 &mdash; Query:</span> A Glue table with <span class="nar-highlight">partition projection</span> auto-discovers all partitions. Analysts query via a dedicated <span class="nar-highlight">Athena workgroup</span> with byte-scan limits. Pre-computed columns mean zero transforms at query time.'
+  ];
+  var defaultNar = 'Click any step to trace how data moves through the pipeline.';
+  var autoMode = true;
+
+  /* ── Step Selection ── */
+  window.selectStep = function(step) {
+    autoMode = (step === -1);
+    btnAll.classList.toggle('active', step === -1);
+    stepBtns.forEach(function(b) { b.classList.toggle('active', parseInt(b.dataset.step) === step); });
+
+    if (step === -1) {
+      cards.forEach(function(c) { c.classList.remove('dimmed','focused'); c.style.pointerEvents = ''; });
+      connectors.forEach(function(c) { c.classList.remove('dimmed','active-flow'); });
+      narEl.innerHTML = defaultNar;
+      return;
+    }
+
+    narEl.innerHTML = narrations[step];
+    cards.forEach(function(c, i) {
+      c.classList.remove('dimmed','focused'); c.style.pointerEvents = '';
+      if (i < step) c.classList.add('dimmed');
+      else if (i === step) c.classList.add('focused');
+    });
+    connectors.forEach(function(c, i) {
+      c.classList.remove('dimmed','active-flow');
+      if (i < step) c.classList.add('dimmed');
+      else c.classList.add('active-flow');
+    });
+    fireFromStep(step);
+  };
+
+  function fireFromStep(step) {
+    var ids = [];
+    for (var i = step; i < 3; i++) ids.push(particleIds[i]);
+    if (!ids.length) return;
+    (function chain(idx) {
+      if (idx >= ids.length) return;
+      fireParticle(ids[idx], 0, function() { chain(idx+1); });
+      fireTrail(ids[idx], 120);
+      fireTrail(ids[idx], 240);
+    })(0);
+  }
+
+  function fireTrail(pid, delay) {
+    var parent = document.getElementById(pid).parentElement;
+    setTimeout(function() {
+      var t = document.createElement('div');
+      t.className = 'particle-trail';
+      t.style.left = 'calc(50% - 2px)';
+      parent.appendChild(t);
+      void t.offsetWidth;
+      t.classList.add('active');
+      t.addEventListener('animationend', function() { t.remove(); });
+    }, delay);
+  }
+
+  /* ── Status Cycling ── */
+  var statuses = [
+    {n:'Available', c:'status-available'}, {n:'Incoming', c:'status-incoming'},
+    {n:'Connected', c:'status-connected'}, {n:'ACW', c:'status-acw'},
+    {n:'Available', c:'status-available'}, {n:'Break', c:'status-break'},
+    {n:'Available', c:'status-available'}, {n:'Incoming', c:'status-incoming'},
+    {n:'Connected', c:'status-connected'}, {n:'ACW', c:'status-acw'},
+    {n:'Offline', c:'status-offline'}, {n:'Available', c:'status-available'}
+  ];
+  var sIdx = 0, badge = document.getElementById('statusBadge'), sText = document.getElementById('statusText');
+  var manualPause = false, manualTimer = null;
+
+  function cycleStatus() {
+    if (manualPause) return;
+    sIdx = (sIdx+1) % statuses.length;
+    setStatus(statuses[sIdx].n, statuses[sIdx].c);
+    fillBuffer();
+  }
+
+  function setStatus(name, cls) {
+    badge.className = 'status-badge ' + cls;
+    sText.textContent = name;
+    document.querySelectorAll('.status-pick').forEach(function(p) {
+      p.classList.toggle('selected', p.textContent.trim() === name);
+    });
+  }
+
+  window.pickStatus = function(name, cls, el) {
+    manualPause = true;
+    if (manualTimer) clearTimeout(manualTimer);
+    setStatus(name, cls);
+    document.querySelectorAll('.status-pick').forEach(function(p) { p.classList.remove('selected'); });
+    el.classList.add('selected');
+    fillBuffer();
+    manualTimer = setTimeout(function() { manualPause = false; }, 8000);
+  };
+
+  setInterval(cycleStatus, 2200);
+
+  /* ── Buffer ── */
+  var bufCount = 0;
+  var bDots = [0,1,2,3,4].map(function(i) { return document.getElementById('bd'+i); });
+  var flushEl = document.getElementById('flushLabel');
+
+  function fillBuffer() {
+    if (bufCount < 5) { bDots[bufCount].classList.add('filled'); bufCount++; }
+    if (bufCount >= 5) {
+      flushEl.classList.add('active');
+      setTimeout(function() {
+        if (autoMode) fireChain();
+        setTimeout(function() {
+          bDots.forEach(function(d){ d.classList.remove('filled'); });
+          flushEl.classList.remove('active');
+          bufCount = 0;
+        }, 350);
+      }, 500);
+    }
+  }
+
+  /* ── Particles ── */
+  function fireParticle(id, delay, cb) {
+    setTimeout(function() {
+      var p = document.getElementById(id);
+      p.classList.remove('active'); void p.offsetWidth; p.classList.add('active');
+      p.addEventListener('animationend', function h() {
+        p.classList.remove('active'); p.removeEventListener('animationend', h);
+        var map = {p1:'card-lambda', p2:'card-s3', p3:'card-athena'};
+        var card = document.getElementById(map[id]);
+        if (card && !card.classList.contains('dimmed')) {
+          card.classList.remove('pulse'); void card.offsetWidth; card.classList.add('pulse');
+          card.addEventListener('animationend', function h2() { card.classList.remove('pulse'); card.removeEventListener('animationend', h2); });
+        }
+        if (cb) cb();
+      });
+    }, delay);
+  }
+
+  function fireChain() {
+    fireParticle('p1', 0, function() {
+      fireParticle('p2', 150, function() { fireParticle('p3', 150); });
+    });
+  }
+
+  /* ── SQL Typing ── */
+  var sql = [
+    {t:'SELECT ',c:'sql-kw'},{t:'agent_name',c:'sql-col'},{t:', ',c:'sql-col'},
+    {t:'status_name',c:'sql-col'},{t:',\n       ',c:'sql-col'},
+    {t:'SUM',c:'sql-kw'},{t:'(duration_seconds) ',c:'sql-col'},
+    {t:'AS ',c:'sql-kw'},{t:'total_seconds\n',c:'sql-col'},
+    {t:'FROM ',c:'sql-kw'},{t:'agent_state_transitions',c:'sql-tbl'},{t:'\n',c:'sql-col'},
+    {t:'WHERE ',c:'sql-kw'},{t:'year = ',c:'sql-col'},{t:'2026',c:'sql-val'},
+    {t:' AND ',c:'sql-kw'},{t:'month = ',c:'sql-col'},{t:'2',c:'sql-val'},{t:'\n',c:'sql-col'},
+    {t:'GROUP BY ',c:'sql-kw'},{t:'agent_name, status_name',c:'sql-col'},{t:';',c:'sql-col'}
+  ];
+  var sqlEl = document.getElementById('sqlBlock'), pi = 0, ci = 0;
+
+  function typeSQL() {
+    if (pi >= sql.length) { setTimeout(function(){ sqlEl.innerHTML=''; pi=0; ci=0; typeSQL(); }, 4000); return; }
+    var part = sql[pi];
+    var spans = sqlEl.querySelectorAll('span:not(.sql-cursor)'), sp;
+    if (spans.length <= pi) { sp = document.createElement('span'); sp.className = part.c; sqlEl.appendChild(sp); } else { sp = spans[pi]; }
+    var cur = sqlEl.querySelector('.sql-cursor'); if (cur) cur.remove();
+    var ch = part.t.charAt(ci);
+    if (ch === '\n') sp.innerHTML += '<br>'; else sp.textContent += ch;
+    ci++;
+    var ce = document.createElement('span'); ce.className = 'sql-cursor'; sqlEl.appendChild(ce);
+    if (ci >= part.t.length) { pi++; ci = 0; }
+    setTimeout(typeSQL, (ch==='\n'||ch===' ') ? 25 : 40 + Math.random()*25);
+  }
+
+  setTimeout(typeSQL, 1200);
+  setTimeout(fireChain, 1800);
+
+  /* ── Keyboard ── */
+  document.addEventListener('keydown', function(e) {
+    if (e.key >= '1' && e.key <= '4') selectStep(parseInt(e.key)-1);
+    else if (e.key === '0' || e.key === 'Escape') selectStep(-1);
+  });
+
+})();
+</script>
+</body>
+</html>
